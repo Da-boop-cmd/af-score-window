@@ -19,3 +19,12 @@ build/wv2.nupkg
 # 中文使用说明只在压缩包里，不进 git
 【必读】使用说明.txt
 
+
+# 编译中间文件
+build/*.obj
+build/*.res
+build/*.pdb
+build/*.ilk
+build/*.exp
+build/*.lib
+
