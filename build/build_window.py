@@ -267,6 +267,8 @@ def make_zip() -> Path:
             posix = rel.as_posix()
             if posix.startswith("build/") or posix.startswith("data/webview2/"):
                 continue
+            if posix.startswith(".git/"):
+                continue
             if f.name in ("shell.log", ".lock"):
                 continue
             z.write(f, posix)

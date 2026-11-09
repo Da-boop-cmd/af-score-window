@@ -1,4 +1,4 @@
-// af-score 桌面外壳（Win32 + WebView2）
+﻿// af-score 桌面外壳（Win32 + WebView2）
 //
 // 做的事：
 //   1. 选一个空闲端口，拉起随包分发的 python 后端（runtime\python\python.exe -m afscore.web）；
@@ -297,13 +297,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 static bool CreateMainWindow(int nCmdShow) {
+    HICON icoBig = (HICON)LoadImageW(g_inst, MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0,
+                                     LR_DEFAULTSIZE | LR_SHARED);
+    HICON icoSmall = (HICON)LoadImageW(g_inst, MAKEINTRESOURCEW(1), IMAGE_ICON,
+                                       GetSystemMetrics(SM_CXSMICON),
+                                       GetSystemMetrics(SM_CYSMICON), LR_SHARED);
+
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = g_inst;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIcon = icoBig ? icoBig : LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIconSm = icoSmall ? icoSmall : LoadIconW(nullptr, IDI_APPLICATION);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"AfscoreWindowClass";
     if (!RegisterClassExW(&wc)) return false;
@@ -315,6 +322,8 @@ static bool CreateMainWindow(int nCmdShow) {
                              WS_OVERLAPPEDWINDOW, x, y, w, h,
                              nullptr, nullptr, g_inst, nullptr);
     if (!g_hwnd) return false;
+    if (icoBig) SendMessageW(g_hwnd, WM_SETICON, ICON_BIG, (LPARAM)icoBig);
+    if (icoSmall) SendMessageW(g_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)icoSmall);
     ShowWindow(g_hwnd, nCmdShow);
     UpdateWindow(g_hwnd);
     return true;

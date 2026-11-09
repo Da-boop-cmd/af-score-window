@@ -17,7 +17,13 @@ if not exist "%SDK%\include\WebView2.h" (
   exit /b 2
 )
 pushd "%~dp0"
-cl /nologo /std:c++17 /EHsc /O2 /MD /utf-8 launcher.cpp ^
+rc /nologo /fo app.res app.rc
+if errorlevel 1 (
+  echo [ERROR] resource compile failed
+  popd
+  exit /b 3
+)
+cl /nologo /std:c++17 /EHsc /O2 /MD /utf-8 launcher.cpp app.res ^
   /I"%SDK%\include" ^
   /link /SUBSYSTEM:WINDOWS /OUT:"af-score.exe" ^
   "%SDK%\x64\WebView2LoaderStatic.lib" ^
