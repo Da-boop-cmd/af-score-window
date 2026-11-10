@@ -10,16 +10,18 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import math
 import os
+import re
 import socket
 import sys
 import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 
@@ -27,6 +29,8 @@ from . import incremental
 from .webui import INDEX_HTML
 
 VERSION = "1.2.0"
+MAX_UPLOAD = 400 * 1024 * 1024          # 单个 zip 上限 400 MB
+BAD_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 MIME = {".png": "image/png", ".json": "application/json; charset=utf-8",
         ".html": "text/html; charset=utf-8"}
 
@@ -194,13 +198,16 @@ def _run_scan(state: "State", jid: str) -> None:
                 _ACTIVE.pop()
         return
 
-    _JOBS[jid].update(state="done", report=rep)
+    _JOBS[jid]["report"] = rep
     state.last_scan = rep
     try:
         state.reload()
     except BaseException as exc:            # 表重建成功但读不回来：提示用户手动刷新
         _JOBS[jid].update(state="error",
                           error="结果已更新，但重新载入失败（%s）" % exc)
+    else:
+        # 先 reload 再标记 done：避免"done 了但 _ACTIVE 还没释放"的竞态
+        _JOBS[jid].update(state="done")
     finally:
         with _JOBS_LOCK:
             if _ACTIVE:
@@ -221,9 +228,72 @@ def start_scan(state: "State"):
     return jid, None
 
 
+def _run_delete(state: "State", jid: str, job: str) -> None:
+    """删除后重算：删空则清表，否则重建排名与图。"""
+    try:
+        from .pipeline import rebuild
+        from .report import make_figures
+        cache_dir = os.path.join(state.out_dir, "cache")
+        remaining = glob.glob(os.path.join(cache_dir, "*.csv"))
+        if not remaining:
+            for name in ("summary_by_design.csv", "scores.csv"):
+                path = os.path.join(state.out_dir, name)
+                if os.path.exists(path):
+                    os.remove(path)
+            report = {"removed": [job], "designs": 0, "figures": {}}
+        else:
+            df = rebuild(state.out_dir)
+            manifest = incremental.load_manifest(state.out_dir)
+            lookup = {n: r.get("file") for n, r in manifest.items() if r.get("file")}
+            figs = make_figures(df, os.path.join(state.out_dir, "figures"), lookup)
+            report = {"removed": [job], "designs": int(df["job"].nunique()),
+                      "figures": figs}
+        _JOBS[jid]["report"] = report
+        state.reload()
+        _JOBS[jid].update(state="done")     # reload 之后再标 done，避免竞态
+    except BaseException as exc:
+        _JOBS[jid].update(state="error",
+                          error="%s: %s" % (type(exc).__name__, exc))
+    finally:
+        with _JOBS_LOCK:
+            if _ACTIVE:
+                _ACTIVE.pop()
+
+
+def start_delete(state: "State", job: str):
+    with _JOBS_LOCK:
+        if _ACTIVE:
+            return None, _ACTIVE[0]
+        jid = time.strftime("%H%M%S") + "-" + str(int(time.time() * 1000) % 1000)
+        _JOBS[jid] = {"id": jid, "state": "running", "current": 0, "total": 1,
+                      "file": job, "started": time.strftime("%H:%M:%S"),
+                      "report": None, "error": None}
+        _ACTIVE.append(jid)
+    threading.Thread(target=_run_delete, args=(state, jid, job), daemon=True).start()
+    return jid, None
+
+
+def _safe_zip_name(raw: str):
+    """只接受纯文件名（防路径穿越），且必须是 .zip。"""
+    name = (raw or "").replace("\\", "/").split("/")[-1].strip()
+    if not name or not name.lower().endswith(".zip"):
+        return None
+    if name in (".zip",) or name.startswith("."):
+        return None
+    name = BAD_NAME_CHARS.sub("_", name)
+    if not name.lower().endswith(".zip"):
+        return None
+    return name
+
+
 def make_handler(state: State, quiet: bool, on_quit=None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "afscore-web/" + VERSION
+
+        def _local(self) -> bool:
+            """写操作只允许本机（桌面壳恒为 127.0.0.1）。"""
+            addr = self.client_address[0] if self.client_address else ""
+            return addr in ("127.0.0.1", "::1")
 
         def _send(self, code, body: bytes, ctype: str):
             self.send_response(code)
@@ -277,11 +347,25 @@ def make_handler(state: State, quiet: bool, on_quit=None):
         def do_POST(self):  # noqa: N802
             path = urlparse(self.path).path
             length = int(self.headers.get("Content-Length") or 0)
-            if length:                                   # 丢弃请求体
+            payload = None
+            if path == "/api/delete":                    # 删除需要读 JSON body
+                if length > 65536:
+                    self._drain(length)
+                    self._error(413, "请求体过大")
+                    return
+                try:
+                    payload = json.loads(self.rfile.read(length) or b"{}") if length else {}
+                except Exception:
+                    self._error(400, "JSON 解析失败")
+                    return
+            elif length:                                 # 其他接口丢弃请求体
                 try:
                     self.rfile.read(length)
                 except Exception:
                     pass
+            if path == "/api/delete":
+                self._delete(payload or {})
+                return
             if path == "/api/quit":
                 # 只允许本机调用：给桌面壳（C++ 窗口）关窗时用
                 if self.client_address[0] not in ("127.0.0.1", "::1"):
@@ -309,6 +393,158 @@ def make_handler(state: State, quiet: bool, on_quit=None):
                     self._json({"job_id": jid})
                 return
             self._error(404, "未知路径: " + path)
+
+        def do_PUT(self):  # noqa: N802
+            path = urlparse(self.path).path
+            if path == "/api/upload":
+                self._upload()
+                return
+            self._error(404, "未知路径: " + path)
+
+        def _drain(self, length: int) -> None:
+            """提前拒绝时也要把请求体读掉，否则客户端会看到连接被重置。"""
+            todo = max(length, 0)
+            if todo > 2 * 1024 * 1024 * 1024:        # 异常大的请求体：读 2 GB 后断开
+                todo = 2 * 1024 * 1024 * 1024
+                self.close_connection = True
+            while todo > 0:
+                try:
+                    chunk = self.rfile.read(min(1 << 20, todo))
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                todo -= len(chunk)
+
+        def _upload(self):
+            """接收浏览器拖入/选择的 zip，落到 incoming 目录。"""
+            length = int(self.headers.get("Content-Length") or 0)
+
+            if not self._local():
+                self._drain(length)
+                self._error(403, "仅限本机操作")
+                return
+            qs = parse_qs(urlparse(self.path).query)
+            name = _safe_zip_name(qs.get("name", [""])[0])
+            if not name:
+                self._drain(length)
+                self._error(400, "文件名不合法：需要 .zip，且不能带路径")
+                return
+            if _ACTIVE:
+                self._drain(length)
+                self._error(409, "正在扫描，请稍后再试")
+                return
+            incoming = state.incoming_dir
+            if not incoming:
+                self._drain(length)
+                self._error(400, "未配置 incoming 目录")
+                return
+            if length <= 0:
+                self._error(411, "缺少 Content-Length")
+                return
+            if length > MAX_UPLOAD:
+                self._drain(length)
+                self._error(413, "文件超过 400 MB")
+                return
+
+            os.makedirs(incoming, exist_ok=True)
+            target = os.path.join(incoming, name)
+            overwrite = qs.get("overwrite", ["0"])[0] == "1"
+            if os.path.exists(target) and not overwrite:
+                self._drain(length)
+                self._error(409, "同名文件已存在")
+                return
+
+            tmp = target + ".part"
+            head = b""
+            try:
+                with open(tmp, "wb") as fh:
+                    remaining = length
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(1 << 20, remaining))
+                        if not chunk:
+                            break
+                        if len(head) < 4:
+                            head += chunk[:4 - len(head)]
+                        fh.write(chunk)
+                        remaining -= len(chunk)
+                if head[:4] != b"PK\x03\x04":       # zip 魔数
+                    os.remove(tmp)
+                    self._error(400, "不是有效的 zip 文件")
+                    return
+                os.replace(tmp, target)
+                # 上传是完整写入，直接把 mtime 往前挪几秒，
+                # 绕开 scan 的 2 秒防抖（否则"上传完立刻扫描"会被当成正在拷贝而跳过）
+                try:
+                    past = time.time() - 5
+                    os.utime(target, (past, past))
+                except OSError:
+                    pass
+            except OSError as exc:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                self._error(500, "写入失败：%s" % exc)
+                return
+            self._json({"name": name, "size": length})
+
+        def _delete(self, payload: dict):
+            """删除一个设计：源包（若在 incoming）+ 缓存 + 清单，然后后台重算。"""
+            if not self._local():
+                self._error(403, "仅限本机操作")
+                return
+            if _ACTIVE:
+                self._error(409, "正在扫描或重算，请稍后再试")
+                return
+            job = str(payload.get("job") or "").strip()
+            if not job:
+                self._error(400, "缺少 job")
+                return
+
+            cache = os.path.join(state.out_dir, "cache", job + ".csv")
+            manifest = incremental.load_manifest(state.out_dir)
+            rec = manifest.get(job)
+            if not os.path.exists(cache) and not rec:
+                self._error(404, "没有这个设计")
+                return
+
+            # 1) 源包：只删 incoming 目录内的文件（基础设计没有源包，只移结果）
+            src_deleted = False
+            src = (rec or {}).get("file") or ""
+            if src:
+                incoming = state.incoming_dir or ""
+                try:
+                    inside = bool(incoming) and os.path.commonpath(
+                        [os.path.abspath(src), os.path.abspath(incoming)]
+                    ) == os.path.abspath(incoming)
+                except ValueError:
+                    inside = False
+                if inside and os.path.exists(src):
+                    try:
+                        os.remove(src)
+                        src_deleted = True
+                    except OSError as exc:
+                        self._error(500, "删除源包失败：%s" % exc)
+                        return
+
+            # 2) 缓存与清单
+            try:
+                if os.path.exists(cache):
+                    os.remove(cache)
+            except OSError as exc:
+                self._error(500, "删除缓存失败：%s" % exc)
+                return
+            if rec:
+                manifest.pop(job, None)
+                incremental.save_manifest(state.out_dir, manifest)
+
+            # 3) 后台重建排名与图表
+            jid, busy = start_delete(state, job)
+            if jid is None:
+                self._error(409, "已有任务在运行")
+                return
+            self._json({"job_id": jid, "source_deleted": src_deleted})
 
         def _route(self, path: str):
             if path in ("/", "/index.html"):

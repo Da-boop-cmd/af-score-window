@@ -216,13 +216,19 @@ def write_readme() -> None:
         "af-score 桌面版\n"
         "================\n\n"
         "启动：双击 af-score.exe（或 启动桌面版_调试.cmd 看详细报错）\n\n"
-        "第一次打开会显示已有结果；要加新数据：\n"
-        "  1. 把 fold_*.zip 放进 incoming\\\n"
-        "  2. 在窗口里点「扫描新包」\n"
-        "  3. 删掉 zip 再点一次扫描，对应设计会被移除\n\n"
+        "【添加数据包】不用再手动放文件夹了：\n"
+        "  方式一：点工具栏「＋ 添加数据包」→ 选 zip（可多选）\n"
+        "  方式二：把 zip 直接拖进窗口\n"
+        "  上传完会自动扫描，右下角有进度；表格与图表自动更新\n"
+        "  同名包会提示是否覆盖\n\n"
+        "【删除设计】\n"
+        "  点表格最右列的「✕」，或详情面板底部「删除这个设计」\n"
+        "  确认框会说明：源包在 incoming 目录时一并删除源文件，否则只移除结果\n"
+        "  删除后自动重算排名与图表\n\n"
+        "【扫描新包】如果手动把 zip 放进了 incoming 目录，点「扫描新包」也可以\n\n"
         "数据与配置：\n"
         "  data\\out       结果（scores.csv / summary_by_design.csv / figures）\n"
-        "  incoming       新包投放目录\n"
+        "  incoming       新包投放目录（上传的包会落在这里）\n"
         "  config.json    可把 data 改成共享目录（如 \\\\server\\share\\out）\n\n"
         "排查：\n"
         "  data\\shell.log  外壳启动日志（端口、后端、WebView2 状态）\n"
@@ -268,6 +274,8 @@ def make_zip() -> Path:
             if posix.startswith("build/") or posix.startswith("data/webview2/"):
                 continue
             if posix.startswith(".git/"):
+                continue
+            if "__pycache__" in rel.parts or f.suffix == ".pyc":
                 continue
             if f.name in ("shell.log", ".lock"):
                 continue

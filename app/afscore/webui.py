@@ -101,6 +101,54 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:0 0 30px}
 .toolbar button[disabled]{opacity:.55;cursor:default}
 tr.isnew td{background:#fffbe6}
 .tag.new{background:#ffd666;color:#7a4d00}
+button.primary{background:#0053d6;border-color:#0046b8;color:#fff;font-weight:600}
+button.primary:hover{background:#0046b8}
+#drop-mask{position:fixed;inset:0;background:rgba(0,83,214,.12);border:3px dashed #0053d6;
+  display:none;align-items:center;justify-content:center;z-index:90;pointer-events:none}
+#drop-mask.show{display:flex}
+.drop-box{background:#fff;border-radius:14px;padding:22px 30px;font-size:16px;color:#0053d6;
+  box-shadow:0 8px 30px rgba(0,0,0,.18);font-weight:600}
+#up-panel{position:fixed;right:24px;bottom:24px;width:360px;max-width:calc(100vw - 32px);
+  background:#fff;border-radius:14px;box-shadow:0 10px 34px rgba(0,0,0,.18);
+  display:none;z-index:95;overflow:hidden;border:1px solid #e5e9f0}
+#up-panel.show{display:block}
+.up-head{padding:12px 14px;background:#f5f8ff;font-weight:600;font-size:14px;
+  display:flex;justify-content:space-between;align-items:center;color:#1f2933}
+#up-close{cursor:pointer;color:#7b8794;font-size:18px;line-height:1;padding:0 4px}
+#up-list{max-height:240px;overflow:auto;padding:4px 14px}
+.up-row{padding:8px 0;border-bottom:1px solid #f0f3f7;font-size:12px}
+.up-row:last-child{border-bottom:none}
+.up-name{display:flex;justify-content:space-between;gap:8px;color:#1f2933}
+.up-name b{font-weight:600;word-break:break-all}
+.up-name span{white-space:nowrap;color:#52606d}
+.up-bar{height:5px;background:#eef2f7;border-radius:3px;margin-top:6px;overflow:hidden}
+.up-fill{height:100%;width:0;background:#0053d6;transition:width .2s}
+.up-row.ok .up-fill{background:#2f9e44}
+.up-row.err .up-fill{background:#d64545}
+.up-row.err .up-name span{color:#d64545}
+.up-foot{padding:10px 14px;font-size:12px;color:#52606d;background:#fafbfc}
+.act{width:34px;text-align:center}
+.del-btn{border:none;background:transparent;color:#b0b7c3;cursor:pointer;font-size:14px;
+  padding:2px 6px;border-radius:6px;line-height:1}
+.del-btn:hover{background:#ffe3e3;color:#d64545}
+button.danger{background:#d64545;border-color:#b93b3b;color:#fff;font-weight:600}
+button.danger:hover{background:#b93b3b}
+button.danger-ghost{margin-top:14px;background:#fff;border:1px solid #f0c2c2;color:#c92a2a}
+button.danger-ghost:hover{background:#fff5f5}
+#del-modal{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;
+  align-items:center;justify-content:center;z-index:100}
+#del-modal.show{display:flex}
+.modal{background:#fff;border-radius:14px;padding:20px 22px;width:400px;
+  max-width:calc(100vw - 40px);box-shadow:0 18px 50px rgba(0,0,0,.28)}
+.modal h3{margin:0 0 10px;font-size:16px;color:#1f2933;word-break:break-all}
+.modal-text{margin:0;font-size:13px;line-height:1.7;color:#52606d}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+.modal-actions button{padding:7px 16px;border-radius:9px;border:1px solid #d9dee7;
+  background:#fff;cursor:pointer;font-size:13px}
+/* 注意：这两条必须放在 .modal-actions button 之后，否则会被它的 background:#fff 覆盖 */
+.modal-actions button.danger{background:#d64545;border-color:#b93b3b;color:#fff;font-weight:600}
+.modal-actions button.danger:hover{background:#b93b3b}
+.modal-actions button[disabled]{opacity:.6;cursor:default}
 </style>
 </head>
 <body>
@@ -131,8 +179,10 @@ tr.isnew td{background:#fffbe6}
         <option value="equal">口径：等权</option>
       </select>
       <button id="reset">重置</button>
+      <button id="btn-add" class="primary">＋ 添加数据包</button>
       <button id="btn-scan">扫描新包</button>
       <button id="btn-reload">刷新数据</button>
+      <input id="file-input" type="file" accept=".zip" multiple hidden>
       <span class="count" id="count"></span>
     </div>
     <div style="max-height:460px;overflow:auto">
@@ -150,6 +200,7 @@ tr.isnew td{background:#fffbe6}
         <div class="metrics" id="detail-metrics"></div>
         <div class="note">同一设计的 5 个采样模型（柱高 = 综合分，橙色为该设计最优模型）：</div>
         <div class="bars" id="model-bars"></div>
+        <button id="del-detail" class="danger-ghost">删除这个设计</button>
       </div>
       <div>
         <div class="note">模型级明细</div>
@@ -195,6 +246,34 @@ tr.isnew td{background:#fffbe6}
     局域网内其他电脑访问：<span class="mono" id="host"></span>
   </footer>
 </main>
+
+<!-- 拖拽导入遮罩 -->
+<div id="drop-mask">
+  <div class="drop-box">松开鼠标，导入 AlphaFold3 结果包（.zip）</div>
+</div>
+
+<!-- 上传进度面板 -->
+<div id="up-panel">
+  <div class="up-head">正在导入数据包 <span id="up-close">×</span></div>
+  <div id="up-list"></div>
+  <div class="up-foot" id="up-foot"></div>
+</div>
+
+<!-- 删除确认 -->
+<div id="del-modal">
+  <div class="modal">
+    <h3 id="del-title">删除这个设计？</h3>
+    <p class="modal-text">
+      将从结果中移除该设计，并重算排名与图表。<br>
+      若源包在 <span class="mono">incoming</span> 目录里，会同时删除源文件；<br>
+      否则只移除结果，不删源文件。
+    </p>
+    <div class="modal-actions">
+      <button id="del-cancel">取消</button>
+      <button id="del-ok" class="danger">删除</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const WEIGHTS = [
@@ -475,7 +554,7 @@ async function refreshData(silent){
 }
 
 async function boot(){
-  el("tbody").innerHTML = `<tr><td colspan="${COLS.length}" class="empty">加载中…</td></tr>`;
+  el("tbody").innerHTML = `<tr><td colspan="${COLS.length + 1}" class="empty">加载中…</td></tr>`;
   try{
     await loadAll(false);
     renderWeights();
@@ -532,9 +611,10 @@ function renderHead(){
   el("thead").innerHTML = COLS.map(([k,label,,])=>{
     const arw = VIEW.key===k ? `<span class="arw">${VIEW.dir>0?"▲":"▼"}</span>` : "";
     return `<th data-k="${k}">${label}${arw}</th>`;
-  }).join("");
+  }).join("") + `<th class="act"></th>`;
   [...el("thead").children].forEach(th=>th.onclick=()=>{
     const k=th.dataset.k;
+    if(!k) return;                       // 操作列不排序
     if(VIEW.key===k) VIEW.dir*=-1; else {VIEW.key=k;VIEW.dir=-1;}
     renderTable();
   });
@@ -556,13 +636,18 @@ function renderTable(){
       if(type==="p") return `<td>${r.pareto_rank_epi===0?"★":(r.pareto_rank_vlp===0?"☆":"")}</td>`;
       return `<td>${fmt(r[k],d)}</td>`;
     }).join("");
+    const del = `<td class="act"><button class="del-btn" data-del="${esc(r.job)}"
+                 title="删除这个设计">✕</button></td>`;
     const klass = [SEL===r.job ? "sel" : "", isNew ? "isnew" : ""].filter(Boolean).join(" ");
-    return `<tr data-job="${esc(r.job)}"${klass?` class="${klass}"`:""}>${tds}</tr>`;
-  }).join("") || `<tr><td colspan="${COLS.length}" class="empty">${DATA.designs.length
+    return `<tr data-job="${esc(r.job)}"${klass?` class="${klass}"`:""}>${tds}${del}</tr>`;
+  }).join("") || `<tr><td colspan="${COLS.length + 1}" class="empty">${DATA.designs.length
       ? "没有匹配的设计"
       : "还没有结果数据 —— 把 fold_*.zip 放进 incoming 目录后点「扫描新包」"}</td></tr>`;
   [...el("tbody").querySelectorAll("tr[data-job]")].forEach(tr=>{
     tr.onclick = ()=> select(tr.dataset.job);
+  });
+  [...el("tbody").querySelectorAll("button[data-del]")].forEach(btn=>{
+    btn.onclick = e => { e.stopPropagation(); openDelete(btn.dataset.del); };
   });
 }
 
@@ -649,6 +734,182 @@ el("copy").onclick = async () => {  const btn = el("copy"), txt = btn.textConten
     btn.textContent = location.host;   // http 下剪贴板不可用时，至少把地址显示出来
   }
   setTimeout(()=>{ btn.textContent = txt; }, 1800);
+};
+
+/* ---------------- 添加数据包：拖拽 / 选择 → 上传 → 自动扫描 ---------------- */
+const MAX_UP = 400 * 1024 * 1024;      // 与后端 MAX_UPLOAD 一致
+let UP_BUSY = false;
+
+function showDrop(on){ el("drop-mask").classList.toggle("show", !!on); }
+
+function upRow(name){
+  const id = "up-" + Math.random().toString(36).slice(2, 8);
+  const div = document.createElement("div");
+  div.className = "up-row";
+  div.id = id;
+  div.innerHTML = `<div class="up-name"><b>${esc(name)}</b><span>等待</span></div>
+                   <div class="up-bar"><div class="up-fill"></div></div>`;
+  el("up-list").appendChild(div);
+  return id;
+}
+
+function upSet(id, pct, text, cls){
+  const row = document.getElementById(id);
+  if(!row) return;
+  row.querySelector(".up-name span").textContent = text;
+  row.querySelector(".up-fill").style.width = Math.max(0, Math.min(100, pct)) + "%";
+  row.classList.remove("ok", "err");
+  if(cls) row.classList.add(cls);
+}
+
+function uploadOne(file, overwrite){
+  return new Promise(resolve => {
+    const id = upRow(file.name);
+    if(!/\.zip$/i.test(file.name)){
+      upSet(id, 100, "不是 zip", "err");
+      return resolve({ok:false, error:"不是 .zip"});
+    }
+    if(file.size > MAX_UP){
+      upSet(id, 100, "超过 400 MB", "err");
+      return resolve({ok:false, error:"超过 400 MB"});
+    }
+    upSet(id, 0, "上传中…");
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", "/api/upload?name=" + encodeURIComponent(file.name) +
+                    (overwrite ? "&overwrite=1" : ""));
+    xhr.upload.onprogress = e => {
+      if(e.lengthComputable) upSet(id, e.loaded / e.total * 100,
+                                   "上传中 " + Math.round(e.loaded / e.total * 100) + "%");
+    };
+    xhr.onload = () => {
+      let body = {};
+      try{ body = JSON.parse(xhr.responseText || "{}"); }catch(e){}
+      if(xhr.status === 200){ upSet(id, 100, "完成", "ok"); resolve({ok:true}); }
+      else if(xhr.status === 409){ upSet(id, 100, "同名已存在", "err"); resolve({ok:false, error:"exists"}); }
+      else { upSet(id, 100, body.error || ("失败 " + xhr.status), "err");
+             resolve({ok:false, error:body.error || ("HTTP " + xhr.status)}); }
+    };
+    xhr.onerror = () => { upSet(id, 100, "网络错误", "err"); resolve({ok:false, error:"网络错误"}); };
+    xhr.send(file);
+  });
+}
+
+async function uploadFiles(files){
+  if(UP_BUSY) return;
+  const list = [...files].filter(Boolean);
+  if(!list.length) return;
+  UP_BUSY = true;
+  el("btn-add").disabled = true;
+  el("up-panel").classList.add("show");
+  el("up-list").innerHTML = "";
+  el("up-foot").textContent = "准备上传 " + list.length + " 个文件…";
+
+  let ok = 0;
+  for(const f of list){
+    let r = await uploadOne(f, false);
+    if(!r.ok && r.error === "exists"){
+      if(confirm("已存在同名文件：\n" + f.name + "\n\n覆盖它吗？")){
+        r = await uploadOne(f, true);
+      }
+    }
+    if(r.ok) ok += 1;
+  }
+
+  UP_BUSY = false;
+  el("btn-add").disabled = false;
+  if(ok){
+    el("up-foot").textContent = `成功 ${ok} / ${list.length}，开始扫描…`;
+    startScan();
+    setTimeout(()=> el("up-panel").classList.remove("show"), 6000);
+  }else{
+    el("up-foot").textContent = `失败 ${list.length} 个，未开始扫描`;
+  }
+}
+
+el("btn-add").onclick = () => el("file-input").click();
+el("file-input").onchange = e => { uploadFiles(e.target.files); e.target.value = ""; };
+el("up-close").onclick = () => el("up-panel").classList.remove("show");
+
+["dragenter", "dragover"].forEach(t => document.addEventListener(t, e => {
+  if(!e.dataTransfer) return;
+  e.preventDefault();                      // 不拦的话 WebView2 会直接用浏览器打开文件
+  if([...e.dataTransfer.types].includes("Files")) showDrop(true);
+}));
+document.addEventListener("dragleave", e => { if(!e.relatedTarget) showDrop(false); });
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  showDrop(false);
+  if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length){
+    uploadFiles(e.dataTransfer.files);
+  }
+});
+
+/* ---------------- 删除设计 ---------------- */
+let DEL_JOB = null;
+
+function openDelete(job){
+  DEL_JOB = job;
+  el("del-title").textContent = "删除 " + job + " ？";
+  el("del-modal").classList.add("show");
+}
+function closeDelete(){
+  el("del-modal").classList.remove("show");
+  DEL_JOB = null;
+}
+
+el("del-cancel").onclick = closeDelete;
+el("del-modal").onclick = e => { if(e.target.id === "del-modal") closeDelete(); };
+document.addEventListener("keydown", e => { if(e.key === "Escape") closeDelete(); });
+el("del-detail").onclick = () => { if(SEL) openDelete(SEL); };
+
+async function pollDelete(id, job){
+  showBanner("warn", "正在删除 " + job + " 并重算图表…", "");
+  for(;;){
+    let j;
+    try{ j = await (await fetch("/api/jobs/" + id)).json(); }
+    catch(e){ await new Promise(r => setTimeout(r, 800)); continue; }
+    if(j.state === "running"){ await new Promise(r => setTimeout(r, 600)); continue; }
+    if(j.state === "error"){
+      showBanner("bad", "删除失败：" + (j.error || "未知错误"), "");
+      return;
+    }
+    await loadAll(true);
+    const rep = j.report || {};
+    const extra = rep.source_deleted ? "（源包已删除）" : "（源包不在 incoming，仅移除结果）";
+    showBanner("ok", "已删除 " + job + extra,
+               `<button onclick="hideBanner()">知道了</button>`);
+    return;
+  }
+}
+
+el("del-ok").onclick = async () => {
+  if(!DEL_JOB) return;
+  const job = DEL_JOB;
+  const btn = el("del-ok");
+  btn.disabled = true;
+  btn.textContent = "删除中…";
+  try{
+    const resp = await fetch("/api/delete", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({job})
+    });
+    let d = {};
+    try{ d = await resp.json(); }catch(e){}
+    if(!resp.ok){
+      closeDelete();
+      showBanner("bad", d.error || ("删除失败 " + resp.status), "");
+      return;
+    }
+    closeDelete();
+    pollDelete(d.job_id, job);
+  }catch(e){
+    closeDelete();
+    showBanner("bad", "删除失败：" + e.message, "");
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "删除";
+  }
 };
 
 /* 调试/自动化测试用的只读入口（不影响页面） */

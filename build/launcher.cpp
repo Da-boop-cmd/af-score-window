@@ -1,4 +1,4 @@
-﻿// af-score 桌面外壳（Win32 + WebView2）
+// af-score 桌面外壳（Win32 + WebView2）
 //
 // 做的事：
 //   1. 选一个空闲端口，拉起随包分发的 python 后端（runtime\python\python.exe -m afscore.web）；
@@ -288,8 +288,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_GETMINMAXINFO: {
         auto* mmi = (MINMAXINFO*)lp;
-        mmi->ptMinTrackSize.x = 1000;
-        mmi->ptMinTrackSize.y = 640;
+        mmi->ptMinTrackSize.x = 1200;
+        mmi->ptMinTrackSize.y = 760;
         return 0;
     }
     }
@@ -315,9 +315,15 @@ static bool CreateMainWindow(int nCmdShow) {
     wc.lpszClassName = L"AfscoreWindowClass";
     if (!RegisterClassExW(&wc)) return false;
 
-    int w = 1440, h = 920;
-    int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
-    int x = (sw - w) / 2, y = (sh - h) / 2;
+    // 窗口尺寸：优先 1680×1050；屏幕小就用工作区的 92%/90%，并居中
+    RECT work{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    int availW = work.right - work.left;
+    int availH = work.bottom - work.top;
+    int w = (availW >= 1750) ? 1680 : int(availW * 0.92);
+    int h = (availH >= 1100) ? 1050 : int(availH * 0.90);
+    int x = work.left + (availW - w) / 2;
+    int y = work.top + (availH - h) / 2;
     g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"AlphaFold3 评分看板",
                              WS_OVERLAPPEDWINDOW, x, y, w, h,
                              nullptr, nullptr, g_inst, nullptr);
