@@ -244,6 +244,7 @@ button.danger-ghost:hover{background:#fff5f5}
   <footer>
     本页数据来自 <span class="mono">out/scores.csv</span> 与 <span class="mono">out/figures/</span>；
     局域网内其他电脑访问：<span class="mono" id="host"></span>
+    <span class="mono" style="margin-left:10px;color:#9aa5b1">af-score v1.2</span>
   </footer>
 </main>
 

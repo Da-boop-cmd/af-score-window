@@ -213,7 +213,7 @@ def copy_exe() -> None:
 
 def write_readme() -> None:
     (WIN / "README-桌面版.txt").write_text(
-        "af-score 桌面版\n"
+        "af-score 桌面版 v1.2\n"
         "================\n\n"
         "启动：双击 af-score.exe（或 启动桌面版_调试.cmd 看详细报错）\n\n"
         "【添加数据包】不用再手动放文件夹了：\n"

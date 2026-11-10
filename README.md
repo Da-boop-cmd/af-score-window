@@ -1,4 +1,4 @@
-# af-score 桌面版
+# af-score 桌面版 v1.2
 
 AlphaFold3 多聚体预测结果的评分看板，打包成 Windows 桌面程序：
 **WebView2 原生窗口 + 便携 Python 运行时**，解压即用，目标机器不需要装 Python。

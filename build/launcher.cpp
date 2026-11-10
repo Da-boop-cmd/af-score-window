@@ -324,7 +324,7 @@ static bool CreateMainWindow(int nCmdShow) {
     int h = (availH >= 1100) ? 1050 : int(availH * 0.90);
     int x = work.left + (availW - w) / 2;
     int y = work.top + (availH - h) / 2;
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"AlphaFold3 评分看板",
+    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"AlphaFold3 评分看板 v1.2",
                              WS_OVERLAPPEDWINDOW, x, y, w, h,
                              nullptr, nullptr, g_inst, nullptr);
     if (!g_hwnd) return false;
